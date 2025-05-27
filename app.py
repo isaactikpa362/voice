@@ -1,81 +1,94 @@
 import streamlit as st
-import speech_recognition as sr
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
+import av
 import tempfile
+import speech_recognition as sr
 import os
-from datetime import datetime
+import wave
 
-# --- Initialisation de l'état de session ---
-if "paused" not in st.session_state:
-    st.session_state.paused = False
-if "transcription" not in st.session_state:
-    st.session_state.transcription = ""
+st.set_page_config(page_title="Reconnaissance Vocale", layout="centered")
 
-# --- Interface utilisateur ---
-st.title("🎙️ Application de reconnaissance vocale")
-st.markdown("Sélectionnez vos options, puis commencez à parler.")
+st.title("🎙️ Application de Reconnaissance Vocale")
+st.markdown("Enregistrez votre voix, puis obtenez la transcription.")
 
-# Choix de l'API de reconnaissance vocale
-api_choice = st.selectbox("Choisissez l'API de reconnaissance vocale :", ["Google", "Sphinx (hors ligne)"])
-
-# Choix de la langue
-language = st.selectbox("Choisissez votre langue :", [
+# Langue de transcription
+language = st.selectbox("Choisissez la langue :", [
     ("fr-FR", "Français"),
     ("en-US", "Anglais (US)"),
     ("es-ES", "Espagnol"),
-    ("de-DE", "Allemand"),
-    ("it-IT", "Italien")
+    ("de-DE", "Allemand")
 ], format_func=lambda x: x[1])[0]
 
-# Boutons Pause / Reprise
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("⏸️ Mettre en pause"):
-        st.session_state.paused = True
-with col2:
-    if st.button("▶️ Reprendre"):
-        st.session_state.paused = False
+# État de session pour stocker l’audio
+if "audio_file" not in st.session_state:
+    st.session_state.audio_file = None
+if "transcription" not in st.session_state:
+    st.session_state.transcription = ""
 
-# --- Fonction de transcription ---
-def transcribe_speech():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        st.info("Parlez maintenant...")
-        try:
-            audio = r.listen(source, timeout=5, phrase_time_limit=10)
-            if st.session_state.paused:
-                st.warning("Reconnaissance en pause.")
-                return
+# Configuration WebRTC
+client_settings = ClientSettings(
+    media_stream_constraints={"audio": True, "video": False},
+    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
+)
 
-            if api_choice == "Google":
+# Enregistre l'audio capté
+class AudioProcessor:
+    def __init__(self):
+        self.frames = []
+
+    def recv(self, frame):
+        audio = frame.to_ndarray()
+        self.frames.append(audio)
+        return av.AudioFrame.from_ndarray(audio, layout="mono")
+
+processor = AudioProcessor()
+
+webrtc_ctx = webrtc_streamer(
+    key="speech",
+    mode=WebRtcMode.SENDRECV,
+    in_audio=True,
+    client_settings=client_settings,
+    audio_processor_factory=lambda: processor,
+)
+
+# Bouton pour arrêter l'enregistrement et sauvegarder l'audio
+if st.button("🛑 Arrêter et transcrire"):
+    if not processor.frames:
+        st.warning("Aucun audio détecté.")
+    else:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
+            wf = wave.open(tmpfile.name, 'wb')
+            wf.setnchannels(1)
+            wf.setsampwidth(2)  # 16 bits
+            wf.setframerate(16000)
+            import numpy as np
+            audio_data = np.concatenate(processor.frames).astype(np.int16).tobytes()
+            wf.writeframes(audio_data)
+            wf.close()
+            st.session_state.audio_file = tmpfile.name
+
+        # Transcription
+        r = sr.Recognizer()
+        with sr.AudioFile(st.session_state.audio_file) as source:
+            audio = r.record(source)
+            try:
                 text = r.recognize_google(audio, language=language)
-            elif api_choice == "Sphinx (hors ligne)":
-                text = r.recognize_sphinx(audio, language=language)
-            else:
-                text = "[API non prise en charge]"
+                st.success("Transcription réussie :")
+                st.write(text)
+                st.session_state.transcription = text
+            except sr.UnknownValueError:
+                st.error("Impossible de comprendre l'audio.")
+            except sr.RequestError as e:
+                st.error(f"Erreur de service : {e}")
 
-            st.success("Transcription :")
-            st.write(text)
-            st.session_state.transcription += text + "\n"
-
-        except sr.WaitTimeoutError:
-            st.error("⏱️ Aucun son détecté. Essayez à nouveau.")
-        except sr.UnknownValueError:
-            st.error("❌ L'API n'a pas compris l'audio.")
-        except sr.RequestError as e:
-            st.error(f"🚨 Erreur avec le service de reconnaissance : {e}")
-        except Exception as e:
-            st.error(f"❗ Une erreur est survenue : {str(e)}")
-
-# --- Bouton de démarrage ---
-if st.button("🎤 Commencer la reconnaissance vocale"):
-    transcribe_speech()
-
-# --- Téléchargement du texte ---
+# Télécharger le fichier texte
 if st.session_state.transcription:
-    if st.download_button("💾 Télécharger le texte", st.session_state.transcription, file_name="transcription.txt"):
-        st.success("Téléchargement prêt.")
+    st.download_button(
+        label="💾 Télécharger la transcription",
+        data=st.session_state.transcription,
+        file_name="transcription.txt"
+    )
 
-# --- Pied de page ---
-st.markdown("---")
-st.markdown("Développé avec ❤️ en Python et Streamlit.")
-
+# Nettoyage
+if st.session_state.audio_file and os.path.exists(st.session_state.audio_file):
+    os.remove(st.session_state.audio_file)
