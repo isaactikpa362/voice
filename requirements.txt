@@ -1,4 +1,7 @@
 streamlit
-SpeechRecognition
-pocketsphinx
+streamlit-webrtc
+speechrecognition
+numpy
+av
+
 
