@@ -2,6 +2,8 @@ streamlit
 pydub
 speechrecognition
 ffmpeg-python
+transformers
+
 
 
 
