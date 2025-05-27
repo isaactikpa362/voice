@@ -2,8 +2,10 @@ streamlit
 transformers
 librosa
 numpy
-streamlit-webrtc
 ffmpeg-python
+streamlit-webrtc
+
+
 
 
 
