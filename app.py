@@ -1,46 +1,70 @@
 import streamlit as st
-import speech_recognition as sr
+import requests
 import tempfile
 import os
+from pydub import AudioSegment
+import time
+
+# 🔐 Remplacez ceci par votre vraie clé API AssemblyAI
+ASSEMBLYAI_API_KEY = "votre_cle_api"
 
 st.set_page_config(page_title="Transcription Audio", layout="centered")
-st.title("🎧 Transcription de fichier audio")
+st.title("🎙️ Transcription de fichiers audio multi-format")
+st.markdown("Téléversez un fichier audio (.mp3, .wav, .m4a, .ogg, etc.) et obtenez sa transcription grâce à l'API AssemblyAI.")
 
-st.markdown("Téléversez un fichier audio (.wav, .mp3, .m4a) pour obtenir sa transcription.")
+uploaded_file = st.file_uploader("📤 Téléversez un fichier audio", type=["mp3", "wav", "m4a", "ogg"])
 
-# Langue
-language = st.selectbox("Langue de la reconnaissance :", [
-    ("fr-FR", "Français"),
-    ("en-US", "Anglais (US)"),
-    ("es-ES", "Espagnol"),
-    ("de-DE", "Allemand")
-], format_func=lambda x: x[1])[0]
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=uploaded_file.name) as tmp_input:
+        tmp_input.write(uploaded_file.read())
+        tmp_input.flush()
 
-# Téléversement du fichier
-uploaded_file = st.file_uploader("📤 Fichier audio", type=["wav", "mp3", "m4a"])
+        # 🔄 Conversion en WAV (mono, 16kHz PCM)
+        audio = AudioSegment.from_file(tmp_input.name)
+        audio = audio.set_channels(1).set_frame_rate(16000)
 
-if uploaded_file is not None:
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
-        tmpfile.write(uploaded_file.read())
-        tmpfile_path = tmpfile.name
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_wav:
+            audio.export(tmp_wav.name, format="wav")
+            converted_file_path = tmp_wav.name
 
-    st.audio(uploaded_file, format="audio/wav")
+        st.success("✅ Fichier converti et prêt pour la transcription.")
+        st.audio(converted_file_path, format="audio/wav")
 
-    if st.button("🚀 Transcrire"):
-        recognizer = sr.Recognizer()
-        with sr.AudioFile(tmpfile_path) as source:
-            audio = recognizer.record(source)
+        if st.button("🚀 Lancer la transcription"):
+            # 1. Upload vers AssemblyAI
+            headers = {'authorization': ASSEMBLYAI_API_KEY}
+            with open(converted_file_path, 'rb') as f:
+                response = requests.post('https://api.assemblyai.com/v2/upload', headers=headers, data=f)
+            if response.status_code != 200:
+                st.error("❌ Échec de l'upload vers AssemblyAI")
+                st.stop()
 
-            try:
-                text = recognizer.recognize_google(audio, language=language)
-                st.success("📝 Transcription :")
+            upload_url = response.json()['upload_url']
+
+            # 2. Demande de transcription
+            transcript_request = {
+                'audio_url': upload_url,
+                'language_code': 'fr'  # Peut être 'en', 'de', 'es' etc.
+            }
+            transcript_response = requests.post('https://api.assemblyai.com/v2/transcript', json=transcript_request, headers=headers)
+            transcript_id = transcript_response.json()['id']
+
+            # 3. Attente du résultat
+            st.info("⏳ Transcription en cours, veuillez patienter...")
+            status = "processing"
+            while status not in ("completed", "error"):
+                polling_response = requests.get(f'https://api.assemblyai.com/v2/transcript/{transcript_id}', headers=headers)
+                status = polling_response.json()['status']
+                time.sleep(3)
+
+            if status == "completed":
+                text = polling_response.json()['text']
+                st.success("✅ Transcription terminée !")
                 st.write(text)
-
                 st.download_button("💾 Télécharger la transcription", text, file_name="transcription.txt")
-            except sr.UnknownValueError:
-                st.error("❌ Impossible de comprendre l'audio.")
-            except sr.RequestError as e:
-                st.error(f"⚠️ Erreur de service : {e}")
+            else:
+                st.error("❌ La transcription a échoué.")
 
-    # Nettoyage
-    os.remove(tmpfile_path)
+        # Nettoyage
+        os.remove(tmp_input.name)
+        os.remove(converted_file_path)
