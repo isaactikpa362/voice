@@ -1,6 +1,10 @@
+
+ffmpeg-python
 streamlit
-speechrecognition
 pydub
+requests
+ffmpeg-python
+
 
 
 
