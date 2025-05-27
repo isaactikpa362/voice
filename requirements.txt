@@ -1,8 +1,6 @@
 streamlit
-streamlit-webrtc
 speechrecognition
-numpy
-av
+pydub
 
 
 
