@@ -6,7 +6,7 @@ from pydub import AudioSegment
 import time
 
 # 🔐 Remplacez ceci par votre vraie clé API AssemblyAI
-ASSEMBLYAI_API_KEY = "votre_cle_api"
+ASSEMBLYAI_API_KEY = "c979d3e6ba2a40f8b4a3d538d6df25de"
 
 st.set_page_config(page_title="Transcription Audio", layout="centered")
 st.title("🎙️ Transcription de fichiers audio multi-format")
