@@ -1,8 +1,10 @@
 streamlit
-pydub
-speechrecognition
-ffmpeg-python
 transformers
+librosa
+numpy
+streamlit-webrtc
+ffmpeg-python
+
 
 
 
