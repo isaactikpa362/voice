@@ -1,94 +1,46 @@
 import streamlit as st
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, ClientSettings
-import av
-import tempfile
 import speech_recognition as sr
+import tempfile
 import os
-import wave
 
-st.set_page_config(page_title="Reconnaissance Vocale", layout="centered")
+st.set_page_config(page_title="Transcription Audio", layout="centered")
+st.title("🎧 Transcription de fichier audio")
 
-st.title("🎙️ Application de Reconnaissance Vocale")
-st.markdown("Enregistrez votre voix, puis obtenez la transcription.")
+st.markdown("Téléversez un fichier audio (.wav, .mp3, .m4a) pour obtenir sa transcription.")
 
-# Langue de transcription
-language = st.selectbox("Choisissez la langue :", [
+# Langue
+language = st.selectbox("Langue de la reconnaissance :", [
     ("fr-FR", "Français"),
     ("en-US", "Anglais (US)"),
     ("es-ES", "Espagnol"),
     ("de-DE", "Allemand")
 ], format_func=lambda x: x[1])[0]
 
-# État de session pour stocker l’audio
-if "audio_file" not in st.session_state:
-    st.session_state.audio_file = None
-if "transcription" not in st.session_state:
-    st.session_state.transcription = ""
+# Téléversement du fichier
+uploaded_file = st.file_uploader("📤 Fichier audio", type=["wav", "mp3", "m4a"])
 
-# Configuration WebRTC
-client_settings = ClientSettings(
-    media_stream_constraints={"audio": True, "video": False},
-    rtc_configuration={"iceServers": [{"urls": ["stun:stun.l.google.com:19302"]}]}
-)
+if uploaded_file is not None:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
+        tmpfile.write(uploaded_file.read())
+        tmpfile_path = tmpfile.name
 
-# Enregistre l'audio capté
-class AudioProcessor:
-    def __init__(self):
-        self.frames = []
+    st.audio(uploaded_file, format="audio/wav")
 
-    def recv(self, frame):
-        audio = frame.to_ndarray()
-        self.frames.append(audio)
-        return av.AudioFrame.from_ndarray(audio, layout="mono")
+    if st.button("🚀 Transcrire"):
+        recognizer = sr.Recognizer()
+        with sr.AudioFile(tmpfile_path) as source:
+            audio = recognizer.record(source)
 
-processor = AudioProcessor()
-
-webrtc_ctx = webrtc_streamer(
-    key="speech",
-    mode=WebRtcMode.SENDRECV,
-    in_audio=True,
-    client_settings=client_settings,
-    audio_processor_factory=lambda: processor,
-)
-
-# Bouton pour arrêter l'enregistrement et sauvegarder l'audio
-if st.button("🛑 Arrêter et transcrire"):
-    if not processor.frames:
-        st.warning("Aucun audio détecté.")
-    else:
-        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmpfile:
-            wf = wave.open(tmpfile.name, 'wb')
-            wf.setnchannels(1)
-            wf.setsampwidth(2)  # 16 bits
-            wf.setframerate(16000)
-            import numpy as np
-            audio_data = np.concatenate(processor.frames).astype(np.int16).tobytes()
-            wf.writeframes(audio_data)
-            wf.close()
-            st.session_state.audio_file = tmpfile.name
-
-        # Transcription
-        r = sr.Recognizer()
-        with sr.AudioFile(st.session_state.audio_file) as source:
-            audio = r.record(source)
             try:
-                text = r.recognize_google(audio, language=language)
-                st.success("Transcription réussie :")
+                text = recognizer.recognize_google(audio, language=language)
+                st.success("📝 Transcription :")
                 st.write(text)
-                st.session_state.transcription = text
+
+                st.download_button("💾 Télécharger la transcription", text, file_name="transcription.txt")
             except sr.UnknownValueError:
-                st.error("Impossible de comprendre l'audio.")
+                st.error("❌ Impossible de comprendre l'audio.")
             except sr.RequestError as e:
-                st.error(f"Erreur de service : {e}")
+                st.error(f"⚠️ Erreur de service : {e}")
 
-# Télécharger le fichier texte
-if st.session_state.transcription:
-    st.download_button(
-        label="💾 Télécharger la transcription",
-        data=st.session_state.transcription,
-        file_name="transcription.txt"
-    )
-
-# Nettoyage
-if st.session_state.audio_file and os.path.exists(st.session_state.audio_file):
-    os.remove(st.session_state.audio_file)
+    # Nettoyage
+    os.remove(tmpfile_path)
